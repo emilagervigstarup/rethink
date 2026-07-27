@@ -50,6 +50,7 @@ import ST_B_E4H01Y_APL from './devices/ST_B_E4H01Y_APL'
 import WFV474PGV from './devices/WFV474PGV'
 import WLREL6323S from './devices/WLREL6323S'
 import D0211 from './devices/D0211'
+import RH90V9_WW from './devices/RH90V9_WW'
 import { Device as T1Device } from './thinq1/device'
 import { Device as T2Device } from './thinq2/device'
 import { type Connection } from './homeassistant'
@@ -116,6 +117,7 @@ const t2deviceTypes: Record<string, T2Factory> = {
     WLREL6323S, // LG LREL6323S single-oven electric range
     D0211, // LG ThinQ dishwasher (deviceType 204), DB365TXS / DBC435TSL.AASQEIS
     RC90U2_WW, // LG RC9DN9029 heat pump dryer (EU), same AABB dialect as the two dryers above but with the 25-byte EU record layout
+    ['RH90V9_WW']: RH90V9_WW, // LG heat-pump tumble dryer (EU)
 
     // aliases:
     RAC_0B0001_WW: RAC_056905_WW, // a different European variant (deviceType 401, RTK_RTL8720cm), same TLV handler
