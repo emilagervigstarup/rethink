@@ -124,6 +124,36 @@ describe(MODEL_ID, () => {
         assert.equal(props.child_lock, 'OFF')
     })
 
+    test('a 0xec pair updates the state from its second record', () => {
+        const { ha, thinq } = makeDevice()
+        // Captured live: the appliance being powered on, Off -> Ready.
+        thinq.emit(
+            'data',
+            buf(
+                'AAFF200A006000A1FE000100EC004E0000000000002731000000000000000000000000010A002C00000000010000CA0000000000000000000100000000000000000000000000000000000000002D00000000000000CA0000000000000094F4BB',
+            ),
+        )
+        const props = ha.devices[DEVICE_ID].properties
+        assert.equal(props.power, 'ON')
+        assert.equal(props.status, 'Ready')
+    })
+
+    test('a 0xec pair reports the end of a cycle', () => {
+        const { ha, thinq } = makeDevice()
+        // Captured live: TurboWash 39 going from Spinning to End.
+        thinq.emit(
+            'data',
+            buf(
+                'AAFF200A0060009E78000100EC004E00000800010027310000090000000000004200000107002C00000000010000CA0000000000000000000A00000027310000000000000000004000000108002C00000000010000CA00000000000000611EBB',
+            ),
+        )
+        const props = ha.devices[DEVICE_ID].properties
+        assert.equal(props.status, 'End')
+        assert.equal(props.course, 'TurboWash 39')
+        assert.equal(props.energy, 202)
+        assert.equal(props.remaining_time, 0)
+    })
+
     test('energy is read as 16 bits, so it does not wrap at 255 Wh', () => {
         const { ha, thinq } = makeDevice()
         const packet = Buffer.from(SAMPLE_INITIAL)

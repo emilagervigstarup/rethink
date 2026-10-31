@@ -554,7 +554,13 @@ export default class Device extends AABBDevice {
                 if (buf.length >= 61) this.parseModelInfo(buf)
                 return
             case 0x60:
-                if (buf.length >= 92) this.parseStagedEcho(buf)
+                if (buf.length >= 92) {
+                    // A 0xec pair of 39-byte records, previous then current, and how the appliance
+                    // reports nearly every state change; 0xeb on its own is rare. Skipping the
+                    // previous record leaves the current one at the offsets parseStatus expects.
+                    if (buf[10] === 0xec) this.parseStatus(buf.subarray(39))
+                    this.parseStagedEcho(buf)
+                }
                 return
             case 0x86:
                 if (buf.length >= 130) this.parseCounters(buf)
