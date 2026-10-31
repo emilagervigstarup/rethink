@@ -1,5 +1,5 @@
 name: ReThink Cloud (unofficial)
-version: "2026.10.2"
+version: "2026.10.3"
 slug: rethink
 description: Fully-local cloud server for LG ThinQ devices — unofficial fork build (jmcjm/rethink)
 url: https://github.com/jmcjm/rethink-ha-addon
@@ -10,6 +10,10 @@ startup: services
 boot: manual
 init: false
 host_network: true
+ingress: true
+ingress_port: 44401
+panel_icon: mdi:home-automation
+panel_title: ReThink
 map:
   - type: addon_config
     read_only: false

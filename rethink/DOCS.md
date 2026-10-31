@@ -21,7 +21,10 @@ host networking and binds:
 | 47878 | ThinQ1 plain                  |
 | 44401 | management panel              |
 
-The management panel is available at `http://<ha-host>:44401`.
+The management panel opens from the **ReThink** entry in the Home Assistant sidebar and from
+the **Open Web UI** button, through Ingress, and stays available at `http://<ha-host>:44401`.
+Ingress is fixed to port 44401, so changing `management_port` leaves only the direct address
+working.
 
 ## Configuration
 
