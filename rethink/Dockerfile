@@ -10,7 +10,7 @@ RUN apk add --no-cache nodejs npm git
 # jmcjm/rethink `deploy` branch: upstream master + RH90V9_WW dryer handler
 # + Y_V8_Y___W.B32QEUK EU washer extensions. Bump on every add-on update.
 ARG RETHINK_REPO=https://github.com/jmcjm/rethink.git
-ARG RETHINK_REV=bc7bd37dfcac012e99787ec44438e3f4e98ba7ad
+ARG RETHINK_REV=d8c8d5d8d507cb120d485ba7c65041d7e8085b9f
 
 RUN git clone "$RETHINK_REPO" /src \
     && git -C /src checkout "$RETHINK_REV"
@@ -23,7 +23,10 @@ RUN npm ci --ignore-scripts \
 # Runtime stage: Home Assistant base image (s6 entrypoint disabled via init: false)
 FROM $BUILD_FROM
 
-RUN apk add --no-cache nodejs openssl jq
+# ca-certificates is upgraded to drop the compromised eMudhra root, same as upstream's image.
+# openssl is gone: rethink now handles certificates in-process.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache nodejs ca-certificates jq
 
 WORKDIR /app
 COPY --from=build /src/package.json /src/package-lock.json ./
