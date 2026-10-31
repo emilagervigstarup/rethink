@@ -135,15 +135,14 @@ export interface F026Params {
     spin: number
     temp: number
     rinse: number
-    // Hours until cycle END, 0-19. Offset [9] follows from the byte[13]-magic layout
-    // (older wiki examples place delay at [8] with the magic at [12]); a delayed start
-    // has not been session-verified yet.
+    // Hours until cycle END, 0-19, at inner[8].
     delay?: number
 }
 
 // F026 "start program", 18-byte inner payload. The washer has no bare "start current
-// program" opcode — the full program configuration is sent. The fixed 0x03 sits at
-// inner[13] (session-verified 2026-04-13; wiki examples showing byte[12] are unconfirmed).
+// program" opcode here: the full program configuration is sent. Confirmed live on 2026-10-31:
+// with the delay at inner[8] and 0x03 at inner[12] the unit reports Delayed and 3:00 reserved;
+// with them one byte later it starts at once and ignores the delay.
 export function buildF026Start(p: F026Params): Buffer {
     const buf = Buffer.alloc(18)
     buf[0] = 0xf0
@@ -153,8 +152,8 @@ export function buildF026Start(p: F026Params): Buffer {
     buf[4] = p.spin
     buf[5] = p.temp
     buf[6] = p.rinse
-    buf[9] = p.delay ?? 0
-    buf[13] = 0x03
+    buf[8] = p.delay ?? 0
+    buf[12] = 0x03
     return buf
 }
 
