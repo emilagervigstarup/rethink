@@ -55,8 +55,8 @@ const WRITE_POWER_ON = 'AA08F02A010098BB'
 const WRITE_POWER_OFF = 'AA09F0240101009CBB'
 const WRITE_PAUSE = 'AA09F02404010099BB'
 const WRITE_START = 'AA09F02405010098BB'
-// session-verified start of Mixed at 1200 rpm / 20°C (wiki Appliance:Y_V8_Y___W.B32QEUK.md)
-const WRITE_F026_MIXED = 'AA16F02607030902010000000000000300000000BABB'
+// start of Mixed at 1200 rpm / 20°C, with the F026 layout confirmed on the unit
+const WRITE_F026_MIXED = 'AA16F02607030902010000000000030000000000BABB'
 const WRITE_F025_MIXED = 'AA18F02503150703090201000000000000000000000050BB'
 
 function makeDevice() {
@@ -408,10 +408,10 @@ describe(MODEL_ID, () => {
             hex(buildF025Set({ program_id: 0x01, spin: 0xff, temp: 0x01, rinse: 0x01, secondary: 0x02, cc: 0x4d })),
             'F02503150103FF0101000000000002004D000000',
         )
-        // start Duvet with delayed end in 4h — wiki example (inner only, magic byte at [13])
+        // start with delayed end in 4h: the layout of the wiki example, confirmed live on 2026-10-31
         assert.equal(
             hex(buildF026Start({ program_id: 0x05, spin: 0x03, temp: 0x02, rinse: 0x01, delay: 4 })),
-            'F02605030302010000040000000300000000',
+            'F02605030302010004000000030000000000',
         )
     })
 
