@@ -14,10 +14,6 @@ import log from '@/util/logging'
 // Protocol documentation: wiki Appliance:Y_V8_Y___W.B32QEUK.md — 53-byte status layout,
 // 65/96/134/138-byte auxiliary packets, F024/F025/F026/F02A command formats.
 
-// Course map for the EU unit, established 2026-04-15 by rotating the physical dial
-// through every labelled slot while capturing internal MQTT. The shared washer_common
-// COURSES table does not match this unit (e.g. 0x05 is the Drum Clean dial slot here,
-// not Duvet) — the same modelId appears to use region-dependent course tables.
 // Labels of the status byte. Kept local and unchanged because Home Assistant automations and
 // history depend on them; upstream dropped the shared table and renamed several of these.
 export const STATES = [
@@ -43,24 +39,31 @@ export const STATES = [
     'Auto DT Open Pause',
 ]
 
+// Course map for this unit, confirmed 2026-10-31 by turning the dial through all thirteen
+// positions in order and matching each code to its label and programme length (0x0c, Speed 14,
+// reports 14 minutes). Labels follow this unit's panel. The codes agree with upstream's sweep of
+// an FSR7A04PG.
 export const COURSES: Record<number, string> = {
     0x01: 'Cotton',
     0x02: 'Synthetics',
     0x04: 'Eco 40-60',
-    0x05: 'Drum Clean',
+    0x05: 'Bedding',
     0x07: 'Mixed',
-    0x08: 'Speed 14',
-    0x0c: 'Bedding',
-    0x1b: 'Sportswear',
-    0x20: 'Delicates', // Hand/Wool shares 0x20; distinguished only by inner[62] of the 96-byte packet
-    0x2d: 'Hygiene', // steam auto-enabled
+    0x08: 'Sportswear',
+    0x0c: 'Speed 14',
+    0x12: 'Drum Clean',
+    0x1b: 'Hand/Wool',
+    0x20: 'Delicates', // the dial slot that also holds the downloaded course
+    0x2d: 'Allergy', // steam auto-enabled
     0x31: 'TurboWash 39', // turboWash auto-enabled
     0x3a: 'AI Wash', // AIDD LED auto-enabled
-    // Wiki-derived, not verified on this unit:
-    0x03: 'Easy Care',
-    0x06: 'Wool',
-    0x09: 'Rinse+Spin',
-    0x0a: 'Spin Only',
+    // Not dial positions: base courses of downloadable programmes, taken from upstream and not
+    // verified on this unit.
+    0x09: 'Silent Wash',
+    0x0e: 'Rinse+Spin',
+    0x17: 'Spin Only',
+    0x30: 'Quick Drum Clean',
+    0x3b: 'MicroPlastic Care',
 }
 
 // max is model-dependent; on this unit 0xFF selects 1400 rpm.
@@ -74,6 +77,7 @@ export const SPIN_RPM: Record<number, number> = {
     0x07: 1000,
     0x08: 1100,
     0x09: 1200,
+    0x0a: 1400,
 }
 
 export const TEMP_NAMES: Record<number, string> = {

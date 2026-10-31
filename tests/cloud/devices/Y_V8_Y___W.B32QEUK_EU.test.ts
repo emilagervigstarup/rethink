@@ -154,6 +154,31 @@ describe(MODEL_ID, () => {
         assert.equal(props.remaining_time, 0)
     })
 
+    test("the thirteen dial positions read back with this unit's labels", () => {
+        const dial: Record<number, string> = {
+            0x3a: 'AI Wash',
+            0x01: 'Cotton',
+            0x04: 'Eco 40-60',
+            0x31: 'TurboWash 39',
+            0x07: 'Mixed',
+            0x02: 'Synthetics',
+            0x2d: 'Allergy',
+            0x20: 'Delicates',
+            0x1b: 'Hand/Wool',
+            0x08: 'Sportswear',
+            0x0c: 'Speed 14',
+            0x05: 'Bedding',
+            0x12: 'Drum Clean',
+        }
+        for (const [code, label] of Object.entries(dial)) {
+            const { ha, thinq } = makeDevice()
+            const packet = Buffer.from(SAMPLE_INITIAL)
+            packet[2 + 20] = Number(code)
+            thinq.emit('data', packet)
+            assert.equal(ha.devices[DEVICE_ID].properties.course, label)
+        }
+    })
+
     test('energy is read as 16 bits, so it does not wrap at 255 Wh', () => {
         const { ha, thinq } = makeDevice()
         const packet = Buffer.from(SAMPLE_INITIAL)
@@ -177,10 +202,10 @@ describe(MODEL_ID, () => {
         thinq.emit('data', SAMPLE_RUNNING_DOOR_LOCKED)
         const props = ha.devices[DEVICE_ID].properties
         assert.equal(props.status, 'Washing') // 0x06
-        // 0x0C is the Bedding dial slot on the EU unit the course map was verified on
+        // 0x0C is the Speed 14 dial slot, confirmed by its 14-minute programme length
         // (the issue #11 unit showed 0x0C for its 14-minute program — the id space
         // appears to be region-dependent)
-        assert.equal(props.course, 'Bedding')
+        assert.equal(props.course, 'Speed 14')
         assert.equal(props.spin, 400) // spin byte is inner[23], 0x02=400 rpm
         assert.equal(props.temp, '20') // temp byte is inner[24], 0x02=20°C
         assert.equal(props.turbo_wash, 'ON') // flags[29]=0x01
