@@ -98,8 +98,17 @@ export const CC_NAMES: Record<number, string> = {
     0x48: 'Hygiene',
     0x49: 'Small Load',
     0x4d: 'Cold Wash',
+    0x7a: 'Spin',
     0x84: 'Silent Wash',
 }
+
+// Spin only is a downloadable course on base course 0x17. Confirmed on the unit 2026-11-01: it
+// reports 14 minutes, or 1:55 if the set command also carries a temperature and a rinse.
+const SPIN_ONLY_COURSE = 0x17
+const SPIN_ONLY_CC = 0x7a
+const SPIN_MAX_RPM = '1400'
+// The start only takes effect once the washer has acted on the set command before it.
+const SPIN_START_DELAY_MS = 1000
 
 export interface F025Params {
     program_id: number
@@ -453,7 +462,7 @@ export default class Device extends AABBDevice {
                         command_topic: '$this/stage_spin/set',
                         name: 'Staged: Spin',
                         icon: 'mdi:autorenew',
-                        options: ['No spin', '400', '600', '700', '800', '900', '1000', '1100', '1200', 'max'],
+                        options: ['No spin', '400', '600', '700', '800', '900', '1000', '1100', '1200', '1400', 'max'],
                     },
                     stage_temp: {
                         platform: 'select',
@@ -508,6 +517,14 @@ export default class Device extends AABBDevice {
                         payload_press: '',
                         name: 'Start staged program',
                         icon: 'mdi:play-box-outline',
+                    },
+                    run_spin: {
+                        platform: 'button',
+                        unique_id: '$deviceid-run_spin',
+                        command_topic: '$this/run_spin/set',
+                        payload_press: '',
+                        name: 'Run spin',
+                        icon: 'mdi:rotate-right',
                     },
                     power_toggle: {
                         platform: 'button',
@@ -694,12 +711,29 @@ export default class Device extends AABBDevice {
         if (!s.program) return undefined
         const program_id = this.programNameToId(s.program)
         if (program_id === undefined) return undefined
+        if (program_id === SPIN_ONLY_COURSE) return this.spinParams()
         return {
             program_id,
             spin: this.spinNameToByte(s.spin ?? '1000'),
             temp: this.tempNameToByte(s.temp ?? 'Cold'),
             rinse: s.rinse === 'Rinse+' ? 0x02 : 0x01,
+            cc: s.cc ? parseInt(s.cc, 16) : 0,
         }
+    }
+
+    private spinParams() {
+        return {
+            program_id: SPIN_ONLY_COURSE,
+            spin: this.spinNameToByte(this.staged.spin ?? SPIN_MAX_RPM),
+            temp: 0,
+            rinse: 0,
+            cc: SPIN_ONLY_CC,
+        }
+    }
+
+    private runSpin() {
+        this.send(buildF025Set(this.spinParams()))
+        setTimeout(() => this.send(Buffer.from('F024050100', 'hex')), SPIN_START_DELAY_MS)
     }
 
     setProperty(prop: string, mqttValue: string) {
@@ -736,12 +770,17 @@ export default class Device extends AABBDevice {
 
         if (prop === 'set_program') {
             const params = this.stagedParams()
-            if (params) this.send(buildF025Set({ ...params, cc: this.staged.cc ? parseInt(this.staged.cc, 16) : 0 }))
+            if (params) this.send(buildF025Set(params))
             return
         }
         if (prop === 'start_program') {
             const params = this.stagedParams()
-            if (params) this.send(buildF026Start({ ...params, delay: this.staged.delay ?? 0 }))
+            if (params?.program_id === SPIN_ONLY_COURSE) this.runSpin()
+            else if (params) this.send(buildF026Start({ ...params, delay: this.staged.delay ?? 0 }))
+            return
+        }
+        if (prop === 'run_spin') {
+            this.runSpin()
             return
         }
 
