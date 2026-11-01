@@ -99,6 +99,7 @@ describe(MODEL_ID, () => {
             'stage_delay',
             'set_program',
             'start_program',
+            'run_spin',
             'raw_send',
         ]) {
             assert.ok(components[c], `component ${c} present`)
@@ -177,6 +178,55 @@ describe(MODEL_ID, () => {
             thinq.emit('data', packet)
             assert.equal(ha.devices[DEVICE_ID].properties.course, label)
         }
+    })
+
+    describe('spin only', () => {
+        // Sent to the unit on 2026-11-01: it reports a 14-minute programme. With temperature and
+        // rinse set it reports 1:55 instead.
+        const SPIN_1400 = 'AA18F025031517030A0000000000000000007A000000D8BB'
+
+        test('run_spin sets the course, then starts it', async () => {
+            const { thinq, dev } = makeDevice()
+            thinq.resetRecorder()
+
+            dev.setProperty('run_spin', '')
+            assert.deepEqual(thinq.outbox.map(hex), [SPIN_1400])
+
+            await new Promise((resolve) => setTimeout(resolve, 1100))
+            assert.deepEqual(thinq.outbox.map(hex), [SPIN_1400, WRITE_START])
+        })
+
+        test('run_spin takes the staged spin speed', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('stage_spin', '800')
+            thinq.resetRecorder()
+
+            dev.setProperty('run_spin', '')
+            const sent = thinq.outbox[0].subarray(2, -2)
+            assert.equal(sent[6], 0x05)
+            assert.equal(sent[16], 0x7a)
+        })
+
+        test('the staged Spin Only course carries no temperature or rinse', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('stage_program', 'Spin Only')
+            dev.setProperty('stage_spin', '1400')
+            dev.setProperty('stage_temp', '40')
+            thinq.resetRecorder()
+
+            dev.setProperty('set_program', '')
+            assert.deepEqual(thinq.outbox.map(hex), [SPIN_1400])
+        })
+
+        test('Start staged program takes the same route as run_spin', () => {
+            const { thinq, dev } = makeDevice()
+            dev.setProperty('stage_program', 'Spin Only')
+            dev.setProperty('stage_spin', '1400')
+            thinq.resetRecorder()
+
+            dev.setProperty('start_program', '')
+            assert.deepEqual(thinq.outbox.map(hex), [SPIN_1400])
+        })
     })
 
     test('energy is read as 16 bits, so it does not wrap at 255 Wh', () => {
