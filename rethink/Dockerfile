@@ -9,7 +9,7 @@ RUN apk add --no-cache nodejs npm git
 
 # Public rh90v9-fixes branch, based on jmcjm/rethink:deploy.
 ARG RETHINK_REPO=https://github.com/emilagervigstarup/rethink.git
-ARG RETHINK_REV=43f4281e956f98fde10b50ab0734df1185a02938
+ARG RETHINK_REV=4c8ab98b497ef369f34836950e6bfa801ce36074
 
 RUN git clone "$RETHINK_REPO" /src \
     && git -C /src checkout --detach "$RETHINK_REV"

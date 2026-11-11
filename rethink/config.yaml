@@ -1,5 +1,5 @@
 name: ReThink Cloud – LG Dryer
-version: "2026.10.4-rh90v9.2"
+version: "2026.10.4-rh90v9.3"
 slug: rethink_lg
 description: Local LG ThinQ cloud with RH90V9_WW dryer control fixes
 url: https://github.com/emilagervigstarup/rethink/tree/rh90v9-fixes
