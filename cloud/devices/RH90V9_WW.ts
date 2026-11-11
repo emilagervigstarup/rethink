@@ -28,6 +28,13 @@ const ERROR_NAMES =
 export const ERRORS: Record<number, string> = { 0: 'None' }
 ERROR_NAMES.split(' ').forEach((name, i) => (ERRORS[i + 1] = name))
 
+const WARM_AIR = 0x0e
+const WARM_AIR_MINUTES = { min: 10, max: 150, step: 5 } as const
+const OFF = 0
+const READY = 1
+const DRYING = 2
+const PAUSED = 3
+
 export const COURSES: Record<number, string> = {
     0x01: 'Deodoration', // downloadable-only base, no dial slot
     0x02: 'Towels',
@@ -40,7 +47,7 @@ export const COURSES: Record<number, string> = {
     0x0a: 'Delicates',
     0x0b: 'Wool',
     0x0c: 'Rack Dry',
-    0x0e: 'Warm Air',
+    [WARM_AIR]: 'Warm Air',
     0x10: 'Allergy Care',
     0x12: 'Condenser Care',
     0x13: 'Drum Clean',
@@ -69,7 +76,7 @@ export const COURSE_SCHEMA: Record<number, CourseSchema> = {
     0x0a: { dryness: [], defaultDryness: 0, dryLevels: [0x01], defaultDryLevel: 0x01 },
     0x0b: { dryness: [], defaultDryness: 0, dryLevels: [0x01], defaultDryLevel: 0x01 },
     0x0c: { dryness: [], defaultDryness: 0, dryLevels: [0x01], defaultDryLevel: 0x01 },
-    0x0e: { dryness: [], defaultDryness: 0, dryLevels: [0x01, 0x03], defaultDryLevel: 0x01 },
+    [WARM_AIR]: { dryness: [], defaultDryness: 0, dryLevels: [0x01, 0x03], defaultDryLevel: 0x01 },
     0x10: { dryness: [], defaultDryness: 0, dryLevels: [0x03], defaultDryLevel: 0x03 },
     0x12: { dryness: [], defaultDryness: 0, dryLevels: [0x03], defaultDryLevel: 0x03 },
     0x13: { dryness: [], defaultDryness: 0, dryLevels: [0x03], defaultDryLevel: 0x03 },
@@ -171,10 +178,7 @@ export interface F026Params {
     mode?: number // START_MODE / RESUME_MODE
 }
 
-// F026 starts a cycle, with the full configuration in the payload — the same shape the
-// washer uses, contrary to older documentation claiming F026 only powers the dryer off.
-// (That behaviour comes from sending a malformed payload, which is what `power_off` below
-// still does deliberately.) 16-byte inner payload:
+// F026 starts or resumes a cycle. 16-byte inner payload:
 // F0 26 [course] [dryness] [dryLevel] [duration] 00 00 [delay] 00 00 [options] [mode] 00 00 00
 // Field mapping verified 2026-07-27 against live ThinQ app captures of a start, a start
 // with a 3 h delayed end plus anti-crease, and a resume after pause. Byte 3 read as a
@@ -201,6 +205,9 @@ export function buildF024Pause(): Buffer {
 }
 
 export default class Device extends AABBDevice {
+    private warmAirMinutes: number = WARM_AIR_MINUTES.min
+    private wakeTimer: ReturnType<typeof setTimeout> | undefined
+
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
         super(HA, thinq, false)
         this.setConfig(
@@ -395,6 +402,17 @@ export default class Device extends AABBDevice {
                         icon: 'mdi:water-percent',
                         options: Object.values(DRYNESS_LEVELS),
                     },
+                    stage_warm_air_duration: {
+                        platform: 'number',
+                        unique_id: '$deviceid-stage_warm_air_duration',
+                        state_topic: '$this/stage_warm_air_duration',
+                        command_topic: '$this/stage_warm_air_duration/set',
+                        name: 'Warm Air duration',
+                        icon: 'mdi:timer-outline',
+                        unit_of_measurement: 'min',
+                        mode: 'box',
+                        ...WARM_AIR_MINUTES,
+                    },
                     stage_delay: {
                         platform: 'number',
                         unique_id: '$deviceid-stage_delay',
@@ -449,10 +467,17 @@ export default class Device extends AABBDevice {
                 },
             }),
         )
+        this.publishProperty('stage_warm_air_duration', this.warmAirMinutes)
     }
 
     start() {
         this.send(Buffer.from('F0ED1121010000001800', 'hex'))
+    }
+
+    drop() {
+        clearTimeout(this.wakeTimer)
+        this.wakeTimer = undefined
+        super.drop()
     }
 
     processAABB(buf: Buffer) {
@@ -500,10 +525,10 @@ export default class Device extends AABBDevice {
         const processState = b[9]
         const delayRemaining = b[12] * 60 + b[13]
         const options = b[14]
-        const remoteStart = b[15]
+        const remoteStart = (b[15] & 0x01) !== 0
         const cc = b[23]
 
-        this.lastStatus = { course, dryLevel, options }
+        this.lastStatus = { state, course, dryLevel, dryness: drynessLevel, options, remoteStart }
         if (cc) this.lastCC = cc
 
         this.publishProperty('power', state > 0 ? 'ON' : 'OFF')
@@ -518,11 +543,11 @@ export default class Device extends AABBDevice {
         )
         this.publishProperty(
             'process_state',
-            state === 2 || state === 3
+            state === DRYING || state === PAUSED
                 ? (PROCESS_STATES[processState] ?? `unknown (0x${processState.toString(16)})`)
                 : '-',
         )
-        this.publishProperty('remote_start', remoteStart & 0x01 ? 'ON' : 'OFF')
+        this.publishProperty('remote_start', remoteStart ? 'ON' : 'OFF')
         this.publishProperty('error', errorCode ? 'ON' : 'OFF')
         this.publishProperty('error_message', ERRORS[errorCode] ?? `unknown (0x${errorCode.toString(16)})`)
         this.publishProperty('anti_crease', options & 0x02 ? 'ON' : 'OFF')
@@ -533,7 +558,14 @@ export default class Device extends AABBDevice {
 
     // last known live configuration, used as the fallback when resuming a cycle that was
     // configured on the appliance itself rather than from HA
-    private lastStatus = { course: 0, dryLevel: 0x01, options: 0 }
+    private lastStatus?: {
+        state: number
+        course: number
+        dryLevel: number
+        dryness: number
+        options: number
+        remoteStart: boolean
+    }
 
     // last downloadable-course echo (status byte 23); survives power cycles on the
     // appliance, so it is the safest F025 payload for the power-on wake sequence
@@ -547,40 +579,48 @@ export default class Device extends AABBDevice {
         antiCrease?: boolean
     } = {}
 
-    private stagedF026(mode: number): Buffer | undefined {
+    private stagedStart(): Buffer | undefined {
+        const status = this.lastStatus
+        if (!status || status.state !== READY || !status.remoteStart) return undefined
+
         const courseName = this.staged.course
         const course = courseName
             ? Number(Object.entries(COURSES).find(([, n]) => n === courseName)?.[0])
-            : this.lastStatus.course
-        if (!course) return undefined
+            : status.course
+        const schema = COURSE_SCHEMA[course]
+        if (!schema) return undefined
 
         const levelName = this.staged.dryLevel
         const dryLevel = levelName
             ? Number(Object.entries(DRY_LEVELS).find(([, n]) => n === levelName)?.[0])
-            : this.lastStatus.dryLevel
+            : status.dryLevel
 
         const drynessName = this.staged.dryness
         const dryness = drynessName
             ? Number(Object.entries(DRYNESS_LEVELS).find(([, n]) => n === drynessName)?.[0])
-            : COURSE_SCHEMA[course]?.defaultDryness
+            : schema.defaultDryness
 
-        const antiCrease = this.staged.antiCrease ?? !!(this.lastStatus.options & 0x02)
+        const antiCrease = this.staged.antiCrease ?? !!(status.options & 0x02)
 
         return buildF026Start({
             course,
-            dryLevel,
-            dryness,
-            delay: mode === RESUME_MODE ? DELAY_UNCHANGED : (this.staged.delay ?? 0),
+            dryLevel: schema.dryLevels.includes(dryLevel) ? dryLevel : schema.defaultDryLevel,
+            dryness: schema.dryness.includes(dryness) ? dryness : schema.defaultDryness,
+            duration: course === WARM_AIR ? this.warmAirMinutes : undefined,
+            delay: this.staged.delay,
             options: antiCrease ? 0x02 : 0x00,
-            mode,
         })
     }
 
     setProperty(prop: string, mqttValue: string) {
-        // A malformed F026 payload powers the dryer off — a quirk of the start opcode
-        // rejecting garbage, not a dedicated power command.
+        const status = this.lastStatus
         if (prop === 'power_off') {
-            this.send(Buffer.from('F026010100', 'hex'))
+            clearTimeout(this.wakeTimer)
+            this.wakeTimer = undefined
+            // Power-key command from alexw23's RH90V9_WW implementation (upstream PR #55).
+            if (status && status.state > OFF && status.state < STATES.length) {
+                this.send(Buffer.from('F024010100', 'hex'))
+            }
             return
         }
 
@@ -588,10 +628,14 @@ export default class Device extends AABBDevice {
         // after the last interaction; re-staging the last downloaded course via F025
         // counts as interaction and lifts the gate (sequence found by alexw23, PR #55).
         if (prop === 'power_on') {
+            if ((status && status.state !== OFF) || this.wakeTimer !== undefined) return
             const wake = Object.values(DOWNLOADABLE_COURSES).find((p) => p.cc === this.lastCC)
             if (wake) {
                 this.send(buildF025SetCourse(wake))
-                setTimeout(() => this.send(Buffer.from('F02A0100', 'hex')), 500)
+                this.wakeTimer = setTimeout(() => {
+                    this.wakeTimer = undefined
+                    if (this.lastStatus?.state === OFF) this.send(Buffer.from('F02A0100', 'hex'))
+                }, 500)
             } else {
                 this.send(Buffer.from('F02A0100', 'hex'))
             }
@@ -599,13 +643,38 @@ export default class Device extends AABBDevice {
         }
 
         if (prop === 'pause') {
-            this.send(buildF024Pause())
+            if (status?.state === DRYING) this.send(buildF024Pause())
             return
         }
 
-        if (prop === 'start' || prop === 'resume') {
-            const packet = this.stagedF026(prop === 'resume' ? RESUME_MODE : START_MODE)
+        if (prop === 'start') {
+            const packet = this.stagedStart()
             if (packet) this.send(packet)
+            return
+        }
+
+        if (prop === 'resume') {
+            if (status?.state !== PAUSED || !status.remoteStart || !status.course) return
+            // Use the paused cycle's settings even if a different cycle was staged in HA.
+            this.send(
+                buildF026Start({
+                    course: status.course,
+                    dryLevel: status.dryLevel,
+                    dryness: status.dryness,
+                    delay: DELAY_UNCHANGED,
+                    options: status.options & 0x02,
+                    mode: RESUME_MODE,
+                }),
+            )
+            return
+        }
+
+        if (prop === 'stage_warm_air_duration') {
+            const minutes = Number(mqttValue)
+            const { min, max, step } = WARM_AIR_MINUTES
+            if (!Number.isInteger(minutes) || minutes < min || minutes > max || (minutes - min) % step !== 0) return
+            this.warmAirMinutes = minutes
+            this.publishProperty(prop, minutes)
             return
         }
 

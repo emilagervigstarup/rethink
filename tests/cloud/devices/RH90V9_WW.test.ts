@@ -32,13 +32,21 @@ const SAMPLE_SENSOR_LATER = buf('AA0B303E007F0282057EBB')
 const SAMPLE_CYCLE_START = buf('AA09307200C9004BBB')
 
 const WRITE_INIT = 'AA0EF0ED1121010000001800B5BB'
-const WRITE_POWER_OFF = 'AA09F0260101009EBB'
+const WRITE_POWER_OFF = 'AA09F0240101009CBB'
 
 function makeDevice() {
     const ha = new MockHAConnection()
     const thinq = new MockThinq2Device(DEVICE_ID, META)
     const dev = new DUT(ha.asConnection(), thinq, META)
     return { ha, thinq, dev }
+}
+
+function reportStatus(dev: DUT, state: number, remoteStart = true) {
+    // Use the real Eco settings with the requested state and remote-start flag.
+    const status = Buffer.from(SAMPLE_DRYING_ECO_ANTICREASE.subarray(33, 58))
+    status[0] = state
+    status[15] = remoteStart ? 0x01 : 0x00
+    dev.parseStatusBlock(status)
 }
 
 describe(MODEL_ID, () => {
@@ -68,10 +76,12 @@ describe(MODEL_ID, () => {
             'error',
             'error_message',
             'stage_dryness',
+            'stage_warm_air_duration',
         ]) {
             assert.ok(components[c], `component ${c} present`)
         }
         assert.ok((components.status.options as string[]).includes('Drying'))
+        assert.equal(ha.devices[DEVICE_ID].properties.stage_warm_air_duration, 10)
     })
 
     test('idle heartbeat (30EB) decodes to Ready with no course', () => {
@@ -201,10 +211,16 @@ describe(MODEL_ID, () => {
         assert.equal(hex(thinq.outbox[0]), WRITE_INIT)
     })
 
-    test('HA power_off button sends F026', () => {
+    test('HA power_off sends only the power key when the dryer is on', () => {
         const { thinq, dev } = makeDevice()
         thinq.resetRecorder()
         dev.setProperty('power_off', '')
+        reportStatus(dev, 0)
+        dev.setProperty('power_off', '')
+        assert.equal(thinq.outbox.length, 0)
+        reportStatus(dev, 3)
+        dev.setProperty('power_off', '')
+        assert.equal(thinq.outbox.length, 1)
         assert.equal(hex(thinq.outbox[0]), WRITE_POWER_OFF)
     })
 
@@ -212,14 +228,33 @@ describe(MODEL_ID, () => {
 
     test('power_on stages the last downloaded course as a wake, then sends F02A', async () => {
         const { thinq, dev } = makeDevice()
-        thinq.emit('data', SAMPLE_IDLE) // CC echo 0x70 (Economic Dry)
+        reportStatus(dev, 0) // CC echo 0x70 (Economic Dry)
         thinq.resetRecorder()
+        dev.setProperty('power_on', '')
         dev.setProperty('power_on', '')
         assert.equal(thinq.outbox.length, 1, 'wake F025 goes out first')
         assert.equal(hex(thinq.outbox[0]), 'AA1DF025031500019600000000000000197000000003000000000042BB')
         await new Promise((resolve) => setTimeout(resolve, 600))
         assert.equal(thinq.outbox.length, 2)
         assert.equal(hex(thinq.outbox[1]), WRITE_POWER_ON)
+    })
+
+    test('power_on leaves an already powered dryer alone', () => {
+        const { thinq, dev } = makeDevice()
+        reportStatus(dev, 1)
+        thinq.resetRecorder()
+        dev.setProperty('power_on', '')
+        assert.equal(thinq.outbox.length, 0)
+    })
+
+    test('disconnect cancels the second half of the wake sequence', async () => {
+        const { thinq, dev } = makeDevice()
+        reportStatus(dev, 0)
+        thinq.resetRecorder()
+        dev.setProperty('power_on', '')
+        dev.drop()
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        assert.equal(thinq.outbox.length, 1)
     })
 
     test('power_on without a known downloaded course sends F02A alone', () => {
@@ -303,8 +338,8 @@ describe(MODEL_ID, () => {
         assert.equal(hex(thinq.outbox[0]), WRITE_POWER_OFF)
 
         thinq.resetRecorder()
-        dev.setProperty('raw_send', 'AA09F026010100FFBB') // wrong checksum
-        dev.setProperty('raw_send', 'F026010100') // no AA..BB envelope
+        dev.setProperty('raw_send', 'AA09F024010100FFBB') // wrong checksum
+        dev.setProperty('raw_send', 'F024010100') // no AA..BB envelope
         assert.equal(thinq.outbox.length, 0)
     })
 
@@ -331,6 +366,7 @@ describe(MODEL_ID, () => {
 
     test('staged cycle: configure in HA, then start', () => {
         const { ha, thinq, dev } = makeDevice()
+        reportStatus(dev, 1)
         thinq.resetRecorder()
         dev.setProperty('stage_program', 'Eco')
         dev.setProperty('stage_dry_level', 'Energy save')
@@ -343,48 +379,72 @@ describe(MODEL_ID, () => {
         assert.equal(hex(thinq.outbox[0]), APP_START_ECO_DELAYED)
     })
 
-    test('F026 dryness byte follows the per-course schema', () => {
-        // Warm Air supports no dryness levels, so byte 3 must drop to 0x00 — the 0x03 our
-        // captures pinned is Cupboard, the default of the courses the app happened to start.
-        const { thinq, dev } = makeDevice()
+    test('Warm Air starts with the selected minutes and ignores staged dryness', () => {
+        const { ha, thinq, dev } = makeDevice()
+        reportStatus(dev, 1)
         thinq.resetRecorder()
         dev.setProperty('stage_program', 'Warm Air')
         dev.setProperty('stage_dry_level', 'Energy save')
+        dev.setProperty('stage_dryness', 'Cupboard')
+        dev.setProperty('stage_anti_crease', 'OFF')
+        dev.setProperty('stage_warm_air_duration', '35')
+        for (const invalid of ['0', '36', '35.5', '155', 'NaN', '']) {
+            dev.setProperty('stage_warm_air_duration', invalid)
+        }
+        assert.equal(thinq.outbox.length, 0, 'selecting minutes only changes the staged duration')
+        assert.equal(ha.devices[DEVICE_ID].properties.stage_warm_air_duration, 35)
         dev.setProperty('start', '')
-        assert.equal(hex(thinq.outbox[0]), 'AA14F0260E00010000000000000003000000B3BB')
+        assert.equal(hex(thinq.outbox[0]), 'AA14F0260E000123000000000000030000005CBB')
+
+        thinq.resetRecorder()
+        dev.setProperty('stage_program', 'Cotton')
+        dev.setProperty('start', '')
+        assert.equal(thinq.outbox[0][6], 0x03, 'Cotton uses its supported dry level')
+        assert.equal(thinq.outbox[0][7], 0, 'Warm Air duration does not affect Cotton')
     })
 
     test('staged dryness overrides the schema default', () => {
         const { thinq, dev } = makeDevice()
+        reportStatus(dev, 1)
         thinq.resetRecorder()
         dev.setProperty('stage_program', 'Cotton')
         dev.setProperty('stage_dry_level', 'Time save')
         dev.setProperty('stage_dryness', 'Extra')
+        dev.setProperty('stage_anti_crease', 'OFF')
         dev.setProperty('start', '')
         assert.equal(hex(thinq.outbox[0]), 'AA14F0260704030000000000000003000000B0BB')
     })
 
     test('pause and resume', () => {
         const { thinq, dev } = makeDevice()
+        reportStatus(dev, 2)
         thinq.resetRecorder()
         dev.setProperty('pause', '')
         assert.equal(hex(thinq.outbox[0]), APP_PAUSE)
 
         thinq.resetRecorder()
-        dev.setProperty('stage_program', 'Eco')
-        dev.setProperty('stage_dry_level', 'Energy save')
-        dev.setProperty('stage_anti_crease', 'ON')
+        reportStatus(dev, 3)
+        dev.setProperty('stage_program', 'Warm Air')
+        dev.setProperty('stage_warm_air_duration', '35')
+        dev.setProperty('stage_anti_crease', 'OFF')
         dev.setProperty('resume', '')
-        assert.equal(hex(thinq.outbox[0]), APP_RESUME_ECO, 'resume keeps the delay untouched')
+        assert.equal(hex(thinq.outbox[0]), APP_RESUME_ECO, 'resume keeps the paused cycle and its settings')
     })
 
-    test('resume falls back to the running configuration reported by the dryer', () => {
+    test('start, pause and resume only act in the matching dryer state', () => {
         const { thinq, dev } = makeDevice()
-        // the appliance reports Eco / energy save / anti-crease on
-        thinq.emit('data', SAMPLE_DRYING_ECO_ANTICREASE)
+        dev.setProperty('stage_program', 'Warm Air')
         thinq.resetRecorder()
+        reportStatus(dev, 1, false)
+        dev.setProperty('start', '')
+        reportStatus(dev, 2)
         dev.setProperty('resume', '')
-        assert.equal(hex(thinq.outbox[0]), APP_RESUME_ECO)
+        reportStatus(dev, 3)
+        dev.setProperty('start', '')
+        dev.setProperty('pause', '')
+        reportStatus(dev, 3, false)
+        dev.setProperty('resume', '')
+        assert.equal(thinq.outbox.length, 0)
     })
 
     test('start without any known course emits no packet', () => {
