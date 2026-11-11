@@ -205,7 +205,6 @@ export function buildF024Pause(): Buffer {
 }
 
 export default class Device extends AABBDevice {
-    private warmAirMinutes: number = WARM_AIR_MINUTES.min
     private wakeTimer: ReturnType<typeof setTimeout> | undefined
 
     constructor(HA: Connection, thinq: Thinq2Device, meta: Metadata) {
@@ -467,7 +466,6 @@ export default class Device extends AABBDevice {
                 },
             }),
         )
-        this.publishProperty('stage_warm_air_duration', this.warmAirMinutes)
     }
 
     start() {
@@ -571,44 +569,39 @@ export default class Device extends AABBDevice {
     // appliance, so it is the safest F025 payload for the power-on wake sequence
     private lastCC = 0
 
-    private staged: {
-        course?: string
-        dryLevel?: string
-        dryness?: string
-        delay?: number
-        antiCrease?: boolean
-    } = {}
-
     private stagedStart(): Buffer | undefined {
         const status = this.lastStatus
         if (!status || status.state !== READY || !status.remoteStart) return undefined
 
-        const courseName = this.staged.course
+        const staged = (prop: string) => this.HA.getStagedProperty(this.id, prop)
+        const courseName = staged('stage_program')
         const course = courseName
             ? Number(Object.entries(COURSES).find(([, n]) => n === courseName)?.[0])
             : status.course
         const schema = COURSE_SCHEMA[course]
         if (!schema) return undefined
 
-        const levelName = this.staged.dryLevel
+        const levelName = staged('stage_dry_level')
         const dryLevel = levelName
             ? Number(Object.entries(DRY_LEVELS).find(([, n]) => n === levelName)?.[0])
             : status.dryLevel
 
-        const drynessName = this.staged.dryness
+        const drynessName = staged('stage_dryness')
         const dryness = drynessName
             ? Number(Object.entries(DRYNESS_LEVELS).find(([, n]) => n === drynessName)?.[0])
             : schema.defaultDryness
 
-        const antiCrease = this.staged.antiCrease ?? !!(status.options & 0x02)
+        const antiCrease = staged('stage_anti_crease') ?? (status.options & 0x02 ? 'ON' : 'OFF')
+        const delay = Number(staged('stage_delay'))
+        const warmAirMinutes = parseWarmAirMinutes(staged('stage_warm_air_duration')) ?? WARM_AIR_MINUTES.min
 
         return buildF026Start({
             course,
             dryLevel: schema.dryLevels.includes(dryLevel) ? dryLevel : schema.defaultDryLevel,
             dryness: schema.dryness.includes(dryness) ? dryness : schema.defaultDryness,
-            duration: course === WARM_AIR ? this.warmAirMinutes : undefined,
-            delay: this.staged.delay,
-            options: antiCrease ? 0x02 : 0x00,
+            duration: course === WARM_AIR ? warmAirMinutes : undefined,
+            delay: Number.isInteger(delay) && delay >= 0 && delay <= 19 ? delay : undefined,
+            options: antiCrease === 'ON' ? 0x02 : 0x00,
         })
     }
 
@@ -670,22 +663,12 @@ export default class Device extends AABBDevice {
         }
 
         if (prop === 'stage_warm_air_duration') {
-            const minutes = Number(mqttValue)
-            const { min, max, step } = WARM_AIR_MINUTES
-            if (!Number.isInteger(minutes) || minutes < min || minutes > max || (minutes - min) % step !== 0) return
-            this.warmAirMinutes = minutes
-            this.publishProperty(prop, minutes)
+            const minutes = parseWarmAirMinutes(mqttValue)
+            if (minutes !== undefined) this.HA.publishProperty(this.id, prop, minutes)
             return
         }
 
-        if (prop.startsWith('stage_') && prop !== 'stage_course') {
-            const key = prop.slice('stage_'.length)
-            if (key === 'program') this.staged.course = mqttValue
-            else if (key === 'dry_level') this.staged.dryLevel = mqttValue
-            else if (key === 'dryness') this.staged.dryness = mqttValue
-            else if (key === 'delay') this.staged.delay = Number(mqttValue)
-            else if (key === 'anti_crease') this.staged.antiCrease = mqttValue === 'ON'
-            else return
+        if (['stage_program', 'stage_dry_level', 'stage_dryness', 'stage_delay', 'stage_anti_crease'].includes(prop)) {
             this.HA.publishProperty(this.id, prop, mqttValue)
             return
         }
@@ -712,4 +695,10 @@ export default class Device extends AABBDevice {
             return
         }
     }
+}
+
+function parseWarmAirMinutes(value: string | undefined): number | undefined {
+    const minutes = Number(value)
+    const { min, max, step } = WARM_AIR_MINUTES
+    if (Number.isInteger(minutes) && minutes >= min && minutes <= max && (minutes - min) % step === 0) return minutes
 }

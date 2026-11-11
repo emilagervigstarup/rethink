@@ -81,7 +81,6 @@ describe(MODEL_ID, () => {
             assert.ok(components[c], `component ${c} present`)
         }
         assert.ok((components.status.options as string[]).includes('Drying'))
-        assert.equal(ha.devices[DEVICE_ID].properties.stage_warm_air_duration, 10)
     })
 
     test('idle heartbeat (30EB) decodes to Ready with no course', () => {
@@ -379,6 +378,23 @@ describe(MODEL_ID, () => {
         assert.equal(hex(thinq.outbox[0]), APP_START_ECO_DELAYED)
     })
 
+    test('Towels starts after reconnect using the retained program and options', () => {
+        const { ha, dev } = makeDevice()
+        dev.setProperty('stage_program', 'Towels')
+        dev.setProperty('stage_anti_crease', 'ON')
+        dev.drop()
+
+        const thinq = new MockThinq2Device(DEVICE_ID, META)
+        const reconnected = new DUT(ha.asConnection(), thinq, META)
+        reportStatus(reconnected, 1) // status still shows Eco, not the selected Towels program
+        thinq.resetRecorder()
+        reconnected.setProperty('start', '')
+
+        const expected = buildF026Start({ course: 0x02, dryness: 0, dryLevel: 0x03, options: 0x02 })
+        assert.equal(thinq.outbox.length, 1)
+        assert.deepEqual(thinq.outbox[0].subarray(2, -2), expected)
+    })
+
     test('Warm Air starts with the selected minutes and ignores staged dryness', () => {
         const { ha, thinq, dev } = makeDevice()
         reportStatus(dev, 1)
@@ -393,14 +409,18 @@ describe(MODEL_ID, () => {
         }
         assert.equal(thinq.outbox.length, 0, 'selecting minutes only changes the staged duration')
         assert.equal(ha.devices[DEVICE_ID].properties.stage_warm_air_duration, 35)
-        dev.setProperty('start', '')
-        assert.equal(hex(thinq.outbox[0]), 'AA14F0260E000123000000000000030000005CBB')
+        dev.drop()
+        const reconnectedThinq = new MockThinq2Device(DEVICE_ID, META)
+        const reconnected = new DUT(ha.asConnection(), reconnectedThinq, META)
+        reportStatus(reconnected, 1)
+        reconnected.setProperty('start', '')
+        assert.equal(hex(reconnectedThinq.outbox[0]), 'AA14F0260E000123000000000000030000005CBB')
 
-        thinq.resetRecorder()
-        dev.setProperty('stage_program', 'Cotton')
-        dev.setProperty('start', '')
-        assert.equal(thinq.outbox[0][6], 0x03, 'Cotton uses its supported dry level')
-        assert.equal(thinq.outbox[0][7], 0, 'Warm Air duration does not affect Cotton')
+        reconnectedThinq.resetRecorder()
+        reconnected.setProperty('stage_program', 'Cotton')
+        reconnected.setProperty('start', '')
+        assert.equal(reconnectedThinq.outbox[0][6], 0x03, 'Cotton uses its supported dry level')
+        assert.equal(reconnectedThinq.outbox[0][7], 0, 'Warm Air duration does not affect Cotton')
     })
 
     test('staged dryness overrides the schema default', () => {

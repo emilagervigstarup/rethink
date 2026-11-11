@@ -64,6 +64,10 @@ export class MockHAConnection extends EventEmitter {
         } else this.devices[id].properties[property] = value
     }
 
+    getStagedProperty(id: string, prop: string): string | undefined {
+        return this.devices[id]?.properties[prop]?.toString()
+    }
+
     lookupDevice(dev: string | DeviceInfo) {
         if (typeof dev === 'string') return this.devices[dev]
         return dev

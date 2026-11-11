@@ -42,9 +42,20 @@ type ConnectionEvents = {
     statusChanged: (status: boolean) => void
 }
 
+// Only restore settings stored on state topics. Receiving one of these is never a device command.
+const stagedProperties = new Set([
+    'stage_program',
+    'stage_dry_level',
+    'stage_dryness',
+    'stage_delay',
+    'stage_anti_crease',
+    'stage_warm_air_duration',
+])
+
 export class Connection extends TypedEmitter<ConnectionEvents> {
     client: mqtt.MqttClient
     isConnected: boolean = false
+    private readonly stagedValues = new Map<string, string>()
 
     // record for which devices we have published the availability topic during this connection
     readonly publishedAvailability = new Set<string>()
@@ -74,6 +85,7 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
         // homeassistant/status
         this.client.subscribe(this.config.discovery_prefix + '/status')
+        this.client.subscribe([...stagedProperties].map((prop) => `${this.config.rethink_prefix}/+/${prop}`))
         // rethink/ID/PROPERTY/set, most devices use single-segment property names.
         this.client.subscribe(this.config.rethink_prefix + '/+/+/set')
         // Two-in-one devices (e.g. washer+dryer) namespace by unit: rethink/ID/UNIT/PROPERTY/set
@@ -101,6 +113,9 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
             if (topic.startsWith(this.config.rethink_prefix + '/')) {
                 const pathelements = topic.substring(this.config.rethink_prefix.length + 1).split('/')
+                if (pathelements.length === 2 && packet.retain && stagedProperties.has(pathelements[1])) {
+                    this.stagedValues.set(pathelements.join('/'), message.toString('utf-8'))
+                }
                 // rethink/ID/PROPERTY/set (single-segment) or rethink/ID/UNIT/PROPERTY/set (two-in-one devices)
                 // prop is everything between the ID and the trailing /set, joined back with /
                 if (pathelements.length >= 3 && pathelements[pathelements.length - 1] === 'set') {
@@ -140,6 +155,10 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
         this.client.publish(discoveryTopic + '/config', configPayload)
     }
 
+    getStagedProperty(id: string, prop: string): string | undefined {
+        return this.stagedValues.get(`${id}/${prop}`)
+    }
+
     publishProperty(
         id: string,
         property: string,
@@ -150,6 +169,7 @@ export class Connection extends TypedEmitter<ConnectionEvents> {
 
         if (typeof value === 'number') value = value.toString()
         if (value === undefined) value = 'None' // special case, always accepted by HA, shows up as 'unknown'
+        if (options.retain && stagedProperties.has(property)) this.stagedValues.set(`${id}/${property}`, value)
 
         const deviceTopic = `${this.config.rethink_prefix}/${id}`
         if (property === 'availability') this.publishedAvailability.add(id)
