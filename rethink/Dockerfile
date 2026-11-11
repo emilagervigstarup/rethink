@@ -7,13 +7,12 @@ FROM alpine:3.21 AS build
 
 RUN apk add --no-cache nodejs npm git
 
-# jmcjm/rethink `deploy` branch: upstream master + RH90V9_WW dryer handler
-# + Y_V8_Y___W.B32QEUK EU washer extensions. Bump on every add-on update.
-ARG RETHINK_REPO=https://github.com/jmcjm/rethink.git
-ARG RETHINK_REV=e26dbb1762218f5e939559c904539dc978c5eb10
+# Public rh90v9-fixes branch, based on jmcjm/rethink:deploy.
+ARG RETHINK_REPO=https://github.com/emilagervigstarup/rethink.git
+ARG RETHINK_REV=43f4281e956f98fde10b50ab0734df1185a02938
 
 RUN git clone "$RETHINK_REPO" /src \
-    && git -C /src checkout "$RETHINK_REV"
+    && git -C /src checkout --detach "$RETHINK_REV"
 
 WORKDIR /src
 RUN npm ci --ignore-scripts \

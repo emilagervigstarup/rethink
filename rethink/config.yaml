@@ -1,8 +1,8 @@
-name: ReThink Cloud (unofficial)
-version: "2026.10.4"
-slug: rethink
-description: Fully-local cloud server for LG ThinQ devices — unofficial fork build (jmcjm/rethink)
-url: https://github.com/jmcjm/rethink-ha-addon
+name: ReThink Cloud – LG Dryer
+version: "2026.10.4-rh90v9.2"
+slug: rethink_lg
+description: Local LG ThinQ cloud with RH90V9_WW dryer control fixes
+url: https://github.com/emilagervigstarup/rethink/tree/rh90v9-fixes
 arch:
   - amd64
   - aarch64

@@ -1,10 +1,9 @@
-# ReThink Cloud add-on (unofficial fork)
+# ReThink Cloud – LG Dryer
 
-Runs the [jmcjm/rethink](https://github.com/jmcjm/rethink) fork (`deploy` branch) of
-[anszom/rethink](https://github.com/anszom/rethink) — a fully-local cloud server for
-LG ThinQ devices — directly on Home Assistant OS. On top of upstream, the fork adds a
-handler for the RH90V9_WW heat-pump dryer and extended remote control for the
-Y_V8_Y___W.B32QEUK washer (EU). Not affiliated with upstream.
+Runs [the RH90V9_WW control fixes](https://github.com/emilagervigstarup/rethink/tree/rh90v9-fixes)
+on top of [jmcjm/rethink's deploy branch](https://github.com/jmcjm/rethink/tree/deploy).
+The app pins a source commit and exposes Power off, Warm Air duration and the
+existing cycle controls locally through Home Assistant MQTT discovery.
 
 ## How it works
 
@@ -52,25 +51,9 @@ the host. rethink advertises this port to devices dynamically, so any free port 
 ### Migrating from an existing rethink instance
 
 1. Install the add-on but do not start it yet.
-2. Bring over your CA — two ways:
-   - **UI only:** in the Configuration tab (three-dot menu → Edit in YAML) paste the
-     contents of your existing files into `ca_key_pem` and `ca_cert_pem` as YAML
-     block scalars:
-
-     ```yaml
-     ca_key_pem: |
-       -----BEGIN PRIVATE KEY-----
-       ...
-     ca_cert_pem: |
-       -----BEGIN CERTIFICATE-----
-       ...
-     ```
-
-     On start the add-on writes them to `ca.key` / `ca.cert`. While these options
-     are set they overwrite the files on every start; you can clear them afterwards
-     — the files stay.
-   - **Files:** copy `ca.key` and `ca.cert` into `/addon_configs/<slug>_rethink/`
-     (Samba/SSH add-on or the Studio Code Server add-on).
+2. On the Home Assistant host, copy the existing `ca.key` and `ca.cert` into
+   the new app's configuration folder. Keep both files in the app configuration
+   folders, outside the app's source and build context.
 3. If you used bridge mode (ThinQ app access via the real LG cloud), also copy your
    `state/` directory the file way — it cannot be pasted through the UI. Without it
    devices still connect locally; only the bridge registrations are lost.
